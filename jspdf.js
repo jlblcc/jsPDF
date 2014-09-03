@@ -79,7 +79,8 @@ var jsPDF = (function(global) {
 			'legal'             : [612,  1008],
 			'junior-legal'      : [576,   360],
 			'ledger'            : [1224,  792],
-			'tabloid'           : [792,  1224]
+			'tabloid'           : [792,  1224],
+			'credit-card'       : [153,   243]
 		};
 
 	/**
@@ -406,8 +407,8 @@ var jsPDF = (function(global) {
 			}
 			events.publish('addFonts', { fonts : fonts, dictionary : fontmap });
 		},
-		SAFE = function(fn) {
-			fn.foo = function() {
+		SAFE = function __safeCall(fn) {
+			fn.foo = function __safeCallWrapper() {
 				try {
 					return fn.apply(this, arguments);
 				} catch (e) {
@@ -415,9 +416,8 @@ var jsPDF = (function(global) {
 					if(~stack.indexOf(' at ')) stack = stack.split(" at ")[1];
 					var m = "Error in function " + stack.split("\n")[0].split('<')[0] + ": " + e.message;
 					if(global.console) {
-						console.log(m, e);
+						global.console.error(m, e);
 						if(global.alert) alert(m);
-						console.trace();
 					} else {
 						throw new Error(m);
 					}
@@ -555,7 +555,7 @@ var jsPDF = (function(global) {
 				bch = ch >> 8; // divide by 256
 				if (bch >> 8) {
 					/* something left after dividing by 256 second time */
-					throw new Error("Character at position " + i.toString(10) + " of string '"
+					throw new Error("Character at position " + i + " of string '"
 						+ text + "' exceeds 16bits. Cannot be encoded into UCS-2 BE");
 				}
 				newtext.push(bch);
@@ -587,14 +587,19 @@ var jsPDF = (function(global) {
 						+' (' + pdfEscape(documentProperties[key]) + ')');
 				}
 			}
-			var created = new Date();
+			var created  = new Date(),
+				tzoffset = created.getTimezoneOffset(),
+				tzsign   = tzoffset < 0 ? '+' : '-',
+				tzhour   = Math.floor(Math.abs(tzoffset / 60)),
+				tzmin    = Math.abs(tzoffset % 60),
+				tzstr    = [tzsign, padd2(tzhour), "'", padd2(tzmin), "'"].join('');
 			out(['/CreationDate (D:',
 					created.getFullYear(),
 					padd2(created.getMonth() + 1),
 					padd2(created.getDate()),
 					padd2(created.getHours()),
 					padd2(created.getMinutes()),
-					padd2(created.getSeconds()), ')'].join(''));
+					padd2(created.getSeconds()), tzstr, ')'].join(''));
 		},
 		putCatalog = function() {
 			out('/Type /Catalog');
@@ -623,10 +628,10 @@ var jsPDF = (function(global) {
 			out(drawColor);
 			// resurrecting non-default line caps, joins
 			if (lineCapID !== 0) {
-				out(lineCapID.toString(10) + ' J');
+				out(lineCapID + ' J');
 			}
 			if (lineJoinID !== 0) {
-				out(lineJoinID.toString(10) + ' j');
+				out(lineJoinID + ' j');
 			}
 			events.publish('addPage', { pageNumber : page });
 		},
@@ -751,6 +756,9 @@ var jsPDF = (function(global) {
 		 * @name output
 		 */
 		output = SAFE(function(type, options) {
+			var datauri = ('' + type).substr(0,6) === 'dataur'
+				? 'data:application/pdf;base64,'+btoa(buildDocument()):0;
+
 			switch (type) {
 				case undefined:
 					return buildDocument();
@@ -764,7 +772,7 @@ var jsPDF = (function(global) {
 					saveAs(getBlob(), options);
 					if(typeof saveAs.unload === 'function') {
 						if(global.setTimeout) {
-							setTimeout(saveAs.unload,70);
+							setTimeout(saveAs.unload,911);
 						}
 					}
 					break;
@@ -772,16 +780,20 @@ var jsPDF = (function(global) {
 					return getArrayBuffer();
 				case 'blob':
 					return getBlob();
+				case 'bloburi':
+				case 'bloburl':
+					// User is responsible of calling revokeObjectURL
+					return global.URL && global.URL.createObjectURL(getBlob()) || void 0;
 				case 'datauristring':
 				case 'dataurlstring':
-					return 'data:application/pdf;base64,' + btoa(buildDocument());
+					return datauri;
+				case 'dataurlnewwindow':
+					var nW = global.open(datauri);
+					if (nW || typeof safari === "undefined") return nW;
+					/* pass through */
 				case 'datauri':
 				case 'dataurl':
-					global.document.location.href = 'data:application/pdf;base64,' + btoa(buildDocument());
-					break;
-				case 'dataurlnewwindow':
-					global.open('data:application/pdf;base64,' + btoa(buildDocument()));
-					break;
+					return global.document.location.href = datauri;
 				default:
 					throw new Error('Output type "' + type + '" is not supported.');
 			}
@@ -930,6 +942,10 @@ var jsPDF = (function(global) {
 			 *    T* (line three) Tj
 			 *   ET
 			 */
+			function ESC(s) {
+				s = s.split("\t").join(Array(options.TabLen||9).join(" "));
+				return pdfEscape(s, flags);
+			}
 
 			// Pre-August-2012 the order of arguments was function(x, y, text, flags)
 			// in effort to make all calls have similar signature like
@@ -969,14 +985,14 @@ var jsPDF = (function(global) {
 				flags.autoencode = true;
 
 			if (typeof text === 'string') {
-				text = pdfEscape(text, flags);
+				text = ESC(text);
 			} else if (text instanceof Array) {
 				// we don't want to destroy  original text array, so cloning it
 				var sa = text.concat(), da = [], len = sa.length;
 				// we do array.join('text that must not be PDFescaped")
 				// thus, pdfEscape each component separately
 				while (len--) {
-					da.push(pdfEscape(sa.shift(), flags));
+					da.push(ESC(sa.shift()));
 				}
 				text = da.join(") Tj\nT* (");
 			} else {
@@ -1001,10 +1017,7 @@ var jsPDF = (function(global) {
 		};
 
 		API.line = function(x1, y1, x2, y2) {
-			out(
-				f2(x1 * k) + ' ' + f2((pageHeight - y1) * k) + ' m ' +
-				f2(x2 * k) + ' ' + f2((pageHeight - y2) * k) + ' l S');
-			return this;
+			return this.lines([[x2 - x1, y2 - y1]], x1, y1);
 		};
 
 		/**
@@ -1578,7 +1591,7 @@ var jsPDF = (function(global) {
 				throw new Error("Line cap style of '" + style + "' is not recognized. See or extend .CapJoinStyles property for valid styles");
 			}
 			lineCapID = id;
-			out(id.toString(10) + ' J');
+			out(id + ' J');
 
 			return this;
 		};
@@ -1599,7 +1612,7 @@ var jsPDF = (function(global) {
 				throw new Error("Line join style of '" + style + "' is not recognized. See or extend .CapJoinStyles property for valid styles");
 			}
 			lineJoinID = id;
-			out(id.toString(10) + ' j');
+			out(id + ' j');
 
 			return this;
 		};
@@ -1697,12 +1710,12 @@ var jsPDF = (function(global) {
 	jsPDF.API = {events:[]};
 	jsPDF.version = "1.0.0-trunk";
 
-	if (typeof define === 'function') {
-		define(function() {
+	if (typeof define === 'function' && define.amd) {
+		define('jsPDF', function() {
 			return jsPDF;
 		});
 	} else {
 		global.jsPDF = jsPDF;
 	}
 	return jsPDF;
-}(self));
+}(typeof self !== "undefined" && self || typeof window !== "undefined" && window || this));

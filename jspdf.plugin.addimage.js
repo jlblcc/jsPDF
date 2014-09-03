@@ -158,8 +158,8 @@
 		return typeof value === 'undefined' || value === null;
 	}
 	, generateAliasFromData = function(data) {
-		// TODO: Alias dynamic generation from imageData's checksum/hash
-		return undefined;
+		return typeof data === 'string' && Array.prototype.reduce &&
+			data.split("").reduce(function(a,b){a=((a<<5)-a)+b.charCodeAt(0);return a&a},0);
 	}
 	, doesNotSupportImageType = function(type) {
 		return supported_image_types.indexOf(type) === -1;
@@ -171,6 +171,15 @@
 		return typeof object === 'object' && object.nodeType === 1;
 	}
 	, createDataURIFromElement = function(element, format) {
+
+		//if element is an image which uses data url defintion, just return the dataurl
+		if (element.nodeName === 'IMG' && element.hasAttribute('src')) {
+			var src = ''+element.getAttribute('src');
+			if (src.indexOf('data:image/') === 0) return src;
+
+			// only if the user doesn't care about a format
+			if (!format && /\.png(?:[?#].*)?$/i.test(src)) format = 'png';
+		}
 
 		if(element.nodeName === 'CANVAS') {
 			var canvas = element;
@@ -186,13 +195,13 @@
 			ctx.drawImage(element, 0, 0, canvas.width, canvas.height);
 		}
 
-	    return canvas.toDataURL(format == 'png' ? 'image/png' : 'image/jpeg');
+		return canvas.toDataURL((''+format).toLowerCase() == 'png' ? 'image/png' : 'image/jpeg');
 	}
-	,checkImagesForAlias = function(imageData, images) {
+	,checkImagesForAlias = function(alias, images) {
 		var cached_info;
 		if(images) {
 			for(var e in images) {
-				if(imageData === images[e].alias) {
+				if(alias === images[e].alias) {
 					cached_info = images[e];
 					break;
 				}
@@ -305,7 +314,7 @@
 	 * Check to see if ArrayBuffer is supported
 	 */
 	jsPDFAPI.supportsArrayBuffer = function() {
-		return typeof ArrayBuffer === 'function';
+		return typeof ArrayBuffer !== 'undefined' && typeof Uint8Array !== 'undefined';
 	};
 
 	/**
@@ -325,9 +334,11 @@
 	jsPDFAPI.isArrayBufferView = function(object) {
 		if(!this.supportsArrayBuffer())
 	        return false;
+		if(typeof Uint32Array === 'undefined')
+			return false;
 		return (object instanceof Int8Array ||
 				object instanceof Uint8Array ||
-				object instanceof Uint8ClampedArray ||
+				(typeof Uint8ClampedArray !== 'undefined' && object instanceof Uint8ClampedArray) ||
 				object instanceof Int16Array ||
 				object instanceof Uint16Array ||
 				object instanceof Int32Array ||
@@ -478,29 +489,45 @@
 			format = tmp;
 		}
 
-		var images = getImages.call(this),//initalises internals and events on first run
-			cached_info,
-			dataAsBinaryString;
+		var images = getImages.call(this), info;
 
-		compression = checkCompressValue(compression);
-		format = (format || 'JPEG').toLowerCase();
+		if (!(info = checkImagesForAlias(imageData, images))) {
+			var dataAsBinaryString;
 
-		if(notDefined(alias))
-			alias = generateAliasFromData(imageData);
+			if(isDOMElement(imageData))
+				imageData = createDataURIFromElement(imageData, format);
 
-		if(isDOMElement(imageData))
-			imageData = createDataURIFromElement(imageData, format);
+			if(notDefined(alias))
+				alias = generateAliasFromData(imageData);
 
-		if(this.isString(imageData)) {
+			if (!(info = checkImagesForAlias(alias, images))) {
 
-			var base64Info = this.extractInfoFromBase64DataURI(imageData);
+				if(this.isString(imageData)) {
 
-			if(base64Info) {
+					var base64Info = this.extractInfoFromBase64DataURI(imageData);
 
-				format = base64Info[2];
-				imageData = atob(base64Info[3]);//convert to binary string
+					if(base64Info) {
 
-				/*
+						format = base64Info[2];
+						imageData = atob(base64Info[3]);//convert to binary string
+
+					} else {
+
+						if (imageData.charCodeAt(0) === 0x89 &&
+							imageData.charCodeAt(1) === 0x50 &&
+							imageData.charCodeAt(2) === 0x4e &&
+							imageData.charCodeAt(3) === 0x47  )  format = 'png';
+					}
+				}
+				format = (format || 'JPEG').toLowerCase();
+
+				if(doesNotSupportImageType(format))
+					throw new Error('addImage currently only supports formats ' + supported_image_types + ', not \''+format+'\'');
+
+				if(processMethodNotEnabled(format))
+					throw new Error('please ensure that the plugin for \''+format+'\' support is added');
+
+				/**
 				 * need to test if it's more efficent to convert all binary strings
 				 * to TypedArray - or should we just leave and process as string?
 				 */
@@ -509,29 +536,20 @@
 					imageData = this.binaryStringToUint8Array(imageData);
 				}
 
-			}else{
-				// This is neither raw jpeg-data nor a data uri; alias?
-				if(imageData.charCodeAt(0) !== 0xff)
-					cached_info = checkImagesForAlias(imageData, images);
+				info = this['process' + format.toUpperCase()](
+					imageData,
+					getImageIndex(images),
+					alias,
+					checkCompressValue(compression),
+					dataAsBinaryString
+				);
+
+				if(!info)
+					throw new Error('An unkwown error occurred whilst processing the image');
 			}
 		}
 
-		if(doesNotSupportImageType(format))
-			throw new Error('addImage currently only supports formats ' + supported_image_types + ', not \''+format+'\'');
-
-		if(processMethodNotEnabled(format))
-			throw new Error('please ensure that the plugin for \''+format+'\' support is added');
-
-		var imageIndex = getImageIndex(images),
-			info = cached_info;
-
-		if(!info)
-			info = this['process' + format.toUpperCase()](imageData, imageIndex, alias, compression, dataAsBinaryString);
-
-		if(!info)
-			throw new Error('An unkwown error occurred whilst processing the image');
-
-		writeImageToPDF.call(this, x, y, w, h, info, imageIndex, images);
+		writeImageToPDF.call(this, x, y, w, h, info, info.i, images);
 
 		return this
 	};
@@ -545,7 +563,7 @@
 	//Algorithm from: http://www.64lines.com/jpeg-width-height
 	var getJpegSize = function(imgData) {
 		'use strict'
-		var width, height;
+		var width, height, numcomponents;
 		// Verify we have a valid jpeg header 0xff,0xd8,0xff,0xe0,?,?,'J','F','I','F',0x00
 		if (!imgData.charCodeAt(0) === 0xff ||
 			!imgData.charCodeAt(1) === 0xd8 ||
@@ -575,7 +593,8 @@
 			    imgData.charCodeAt(i+1) === 0xc7) {
 				height = imgData.charCodeAt(i+5)*256 + imgData.charCodeAt(i+6);
 				width = imgData.charCodeAt(i+7)*256 + imgData.charCodeAt(i+8);
-				return [width, height];
+                numcomponents = imgData.charCodeAt(i+9);
+				return [width, height, numcomponents];
 			} else {
 				i += 2;
 				blockLength = imgData.charCodeAt(i)*256 + imgData.charCodeAt(i+1)
@@ -592,7 +611,7 @@
 		var len = data.length,
 			block = (data[4] << 8) + data[5],
 			pos = 4,
-			bytes, width, height;
+			bytes, width, height, numcomponents;
 
 		while(pos < len) {
 			pos += block;
@@ -602,7 +621,8 @@
 				bytes = readBytes(data, pos + 5);
 				width = (bytes[2] << 8) + bytes[3];
 				height = (bytes[0] << 8) + bytes[1];
-				return {width:width, height:height};
+                numcomponents = bytes[4];
+				return {width:width, height:height, numcomponents: numcomponents};
 			}
 
 			pos+=2;
@@ -611,7 +631,7 @@
 		throw new Error('getJpegSizeFromBytes could not find the size of the image');
 	}
 	, readBytes = function(data, offset) {
-		return data.subarray(offset, offset+ 4);
+		return data.subarray(offset, offset+ 5);
 	};
 
 	jsPDFAPI.processJPEG = function(data, index, alias, compression, dataAsBinaryString) {
@@ -623,7 +643,7 @@
 
 		if(this.isString(data)) {
 			dims = getJpegSize(data);
-			return this.createImageInfo(data, dims[0], dims[1], colorSpace, bpc, filter, index, alias);
+			return this.createImageInfo(data, dims[0], dims[1], dims[3] == 1 ? this.color_spaces.DEVICE_GRAY:colorSpace, bpc, filter, index, alias);
 		}
 
 		if(this.isArrayBuffer(data))
@@ -636,7 +656,7 @@
 			// if we already have a stored binary string rep use that
 			data = dataAsBinaryString || this.arrayBufferToBinaryString(data);
 
-			return this.createImageInfo(data, dims.width, dims.height, colorSpace, bpc, filter, index, alias);
+			return this.createImageInfo(data, dims.width, dims.height, dims.numcomponents == 1 ? this.color_spaces.DEVICE_GRAY:colorSpace, bpc, filter, index, alias);
 		}
 
 		return null;
