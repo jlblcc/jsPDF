@@ -330,7 +330,7 @@
 		while (i < l) {
 			cn = cns[i];
 			if (typeof cn === "object") {
-				
+
 				//execute all watcher functions to e.g. reset floating
 				renderer.executeWatchFunctions(cn);
 
@@ -357,7 +357,7 @@
 						renderer.pdf.addPage();
 						renderer.y = renderer.pdf.margins_doc.top;
 					}
-					
+
 				} else if (cn.nodeType === 1 && !SkipNode[cn.nodeName]) {
 					/*** IMAGE RENDERING ***/
 					if (cn.nodeName === "IMG" && images[cn.getAttribute("src")]) {
@@ -366,18 +366,18 @@
 							renderer.y = renderer.pdf.margins_doc.top;
 							//check if we have to set back some values due to e.g. header rendering for new page
 							renderer.executeWatchFunctions(cn);
-						}				
-						
+						}
+
 						var imagesCSS = GetCSS(cn);
 						var imageX = renderer.x;
 						var fontToUnitRatio = 12 / renderer.pdf.internal.scaleFactor;
-						
+
 						//define additional paddings, margins which have to be taken into account for margin calculations
 						var additionalSpaceLeft = (imagesCSS["margin-left"] + imagesCSS["padding-left"])*fontToUnitRatio;
 						var additionalSpaceRight = (imagesCSS["margin-right"] + imagesCSS["padding-right"])*fontToUnitRatio;
 						var additionalSpaceTop = (imagesCSS["margin-top"] + imagesCSS["padding-top"])*fontToUnitRatio;
 						var additionalSpaceBottom = (imagesCSS["margin-bottom"] + imagesCSS["padding-bottom"])*fontToUnitRatio;
-		
+
 						//if float is set to right, move the image to the right border
 						//add space if margin is set
 						if (imagesCSS['float'] !== undefined && imagesCSS['float'] === 'right') {
@@ -412,7 +412,7 @@
 								//just set cursorY after the floating element
 								renderer.watchFunctions.push((function(yPositionAfterFloating, pages, el) {
 									if (renderer.y < yPositionAfterFloating && pages === renderer.pdf.internal.getNumberOfPages()) {
-										if (el.nodeType === 1 && GetCSS(el).clear === 'both') { 
+										if (el.nodeType === 1 && GetCSS(el).clear === 'both') {
 											renderer.y = yPositionAfterFloating;
 											return true;
 										} else {
@@ -433,9 +433,9 @@
 						//if no floating is set, move the rendering cursor after the image height
 						} else {
 							renderer.y += cn.height + additionalSpaceBottom;
-						}					
-					
-					/*** TABLE RENDERING ***/	
+						}
+
+					/*** TABLE RENDERING ***/
 					} else if (cn.nodeName === "TABLE") {
 						table2json = tableToJson(cn, renderer);
 						renderer.y += 10;
@@ -476,7 +476,7 @@
 								radius = 3;
 							}
 							cb = function (x, y) {
-								this.pdf.circle(x, y, radius, 'FD');
+								this.pdf.circle(x, y, radius/this.pdf.internal.scaleFactor, 'FD');
 							};
 						}
 					}
@@ -655,7 +655,7 @@
 			y : this.y
 		};
 	};
-	
+
 	//Checks if we have to execute some watcher functions
 	//e.g. to end text floating around an image
 	Renderer.prototype.executeWatchFunctions = function(el) {
@@ -672,7 +672,7 @@
 			this.watchFunctions = narray;
 		}
 		return ret;
-	};	
+	};
 
 	Renderer.prototype.splitFragmentsIntoLines = function (fragments, styles) {
 		var currentLineLength,
@@ -843,7 +843,7 @@
 
 		//stores the current indent of cursor position
 		var currentIndent = 0;
-		
+
 		while (lines.length) {
 			line = lines.shift();
 			maxLineHeight = 0;
@@ -875,20 +875,20 @@
 				i++;
 			}
 			this.y += maxLineHeight * fontToUnitRatio;
-			
+
 			//if some watcher function was executed sucessful, so e.g. margin and widths were changed,
 			//reset line drawing and calculate position and lines again
 			//e.g. to stop text floating around an image
 			if (this.executeWatchFunctions(line[0][1]) && lines.length > 0) {
 				var localFragments = [];
 				var localStyles = [];
-				//create fragement array of 
+				//create fragement array of
 				lines.forEach(function(localLine) {
 					var i = 0;
 					var l = localLine.length;
 					while (i !== l) {
 						if (localLine[i][0]) {
-							localFragments.push(localLine[i][0]+' '); 
+							localFragments.push(localLine[i][0]+' ');
 							localStyles.push(localLine[i][1]);
 						}
 						++i;
@@ -897,10 +897,10 @@
 				//split lines again due to possible coordinate changes
 				lines = this.splitFragmentsIntoLines(PurgeWhiteSpace(localFragments), localStyles);
 				//reposition the current cursor
-				out("ET", "Q");				
+				out("ET", "Q");
 				out("q", "BT", this.pdf.internal.getCoordinateString(this.x), this.pdf.internal.getVerticalCoordinateString(this.y), "Td");
-			}  			
-			
+			}
+
 		}
 		if (cb && typeof cb === "function") {
 			cb.call(this, this.x - 9, this.y - fontSize / 2);
@@ -961,7 +961,7 @@
 	ClearMap = {
 	  none : 'none',
 	  both : 'both'
-	}; 	
+	};
 	UnitedNumberMap = {
 		normal : 1
 	};
